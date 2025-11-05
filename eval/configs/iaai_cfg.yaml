@@ -1,8 +1,9 @@
-data_path: # Required path to sequence directory
+data_path: /home/myl/image-as-an-imu/iaai_test-sequence/test-office # Required path to sequence directory
 precomputed_vels_path:
-save_suffix:
+save_suffix: base-office
 save_vels: False
 viz_time_series: False
 
-ckpt_path: # Required to load model checkpoint from
-oracle_direction: False
+ckpt_path: /home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage2/1018_135236/ckpt_000019/model.safetensors # Required to load model checkpoint from
+# ckpt_path: /home/myl/image-as-an-imu/checkpoints/segnext_iaai.pth
+oracle_direction: True

@@ -20,12 +20,12 @@ from iaai.utils.viz import visualize_quivers, visualize_hsv, visualize_depth_map
 
 logger = logging.getLogger(__name__)
 
-@hydra.main(config_path="./configs", config_name="train_cfg", version_base="1.2")
+@hydra.main(config_path="./configs", config_name="train_stage2_cfg", version_base="1.2")
 def train_runner(cfg: DictConfig):
-    np.random.seed(cfg.SEED)
-    torch.manual_seed(cfg.SEED)
-    torch.cuda.manual_seed(cfg.SEED)
-
+    np.random.seed(cfg.SEED) # 随机种子设定，确保结果能够复现
+    torch.manual_seed(cfg.SEED) # CPU部分随机数种子设置
+    torch.cuda.manual_seed(cfg.SEED) # GPU部分随机数种子设置
+    # 训练任务类型；assert断言语句，条件表达式true继续运行，false报错
     assert not cfg.TRAINING.USE_PSEUDO_GT or cfg.TRAINING.POSE_ONLY, "USE_PSEUDO_GT can only be True if POSE_ONLY is also True."
 
     if cfg.TRAINING.POSE_ONLY and not cfg.TRAINING.USE_PSEUDO_GT:
@@ -35,41 +35,41 @@ def train_runner(cfg: DictConfig):
         cfg.TRAINING.DEPTH_LOSS_WEIGHT = 0.0
     elif cfg.TRAINING.POSE_ONLY and cfg.TRAINING.USE_PSEUDO_GT:
         cfg.MODEL.POSE_HEAD.SUPERVISE = True
-
-    if cfg.get("DEBUG", False) or cfg.get("debug", False):
+    # debug模式加载
+    if cfg.get("DEBUG", False) or cfg.get("debug", False): # 从cfg中取debug的值，若无则为false
         # Load the debug config
         logger.info("DEBUG MODE ENABLED")
         debug_cfg = OmegaConf.load("./configs/debug_cfg.yml")
-        cfg = OmegaConf.merge(cfg, debug_cfg)
-        logging.getLogger(__name__).setLevel(logging.DEBUG)
-    accelerator = Accelerator(
-        device_placement=True,
-        log_with=cfg.LOGGING.PLATFORM,
-        mixed_precision=cfg.TRAINING.MIXED_PRECISION
+        cfg = OmegaConf.merge(cfg, debug_cfg) # 合并两个配置文件，后一个覆盖前一个
+        logging.getLogger(__name__).setLevel(logging.DEBUG) # 当前模块日志输出最详细的调试信息
+    accelerator = Accelerator( # 无缝管理多GPU与精度
+        device_placement=True, # 自动将模型放到正确的设备上（CPU/GPU）
+        log_with=cfg.LOGGING.PLATFORM, # 指定日志平台
+        mixed_precision=cfg.TRAINING.MIXED_PRECISION # 是否启用混合精度
     )
 
     # Create run name
-    run_name = f"{datetime.datetime.now().strftime('%m%d_%H%M%S')}"
+    run_name = f"{datetime.datetime.now().strftime('%m%d_%H%M%S')}" # string format time，时间对象转化为格式化字符串
     if cfg.RUN_NAME is not None:
         run_name = f"{cfg.RUN_NAME}_{run_name}"
     accelerator.init_trackers(
         project_name="motion-blur", 
         config={
             # Convert the config to dictionary for logging
-            "MODEL": OmegaConf.to_container(cfg.MODEL),
+            "MODEL": OmegaConf.to_container(cfg.MODEL), # 将omegaconf对象转换为普通字典方便传给日志系统记录模型配置
             "TRAINING": OmegaConf.to_container(cfg.TRAINING),
             "DATASET": OmegaConf.to_container(cfg.DATASET),
         },
         init_kwargs={"wandb":{"name":run_name}}
     )
 
-    if accelerator.is_main_process:
+    if accelerator.is_main_process: # 多GPU训练中，只让主进程打印日志
         logger.info(f"Run name: {run_name}")
         logger.info(OmegaConf.to_yaml(cfg))
 
     if cfg.MODEL.TYPE == "mscan":
         model = Blur2PoseSegNeXtBackbone(supervise_pose=cfg.MODEL.POSE_HEAD.SUPERVISE,
-                                         use_pinv=cfg.MODEL.POSE_HEAD.USE_PINV)
+                                         use_pinv=cfg.MODEL.POSE_HEAD.USE_PINV,)
     else:
         raise ValueError(f"Invalid model type: {cfg.MODEL.TYPE}")
 
@@ -82,7 +82,7 @@ def train_runner(cfg: DictConfig):
     elif cfg.MODEL.TYPE == 'da':
         state_dict = torch.load(cfg.MODEL.ENCODER.WEIGHTS, weights_only=False)
         model.pretrained.load_state_dict(state_dict, strict=False)
-    if not cfg.MODEL.POSE_HEAD.SUPERVISE:
+    if not cfg.MODEL.POSE_HEAD.SUPERVISE: # 冻结pose head
         for name, param in model.named_parameters():
             if "pose_head" in name:
                 param.requires_grad = False
@@ -97,9 +97,9 @@ def train_runner(cfg: DictConfig):
         cfg=cfg,
         is_train=False
     )
-
+    # 数据集加载
     # Drop the last batch if only single process (accelerator multi-gpu handles noneven batches by default)
-    drop_last = accelerator.num_processes == 1
+    drop_last = accelerator.num_processes == 1 # 单进程/单GPU丢掉最后一个不完整的batch
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=cfg.TRAINING.BATCH_SIZE,
@@ -114,11 +114,11 @@ def train_runner(cfg: DictConfig):
         num_workers=cfg.TRAINING.NUM_WORKERS,
         drop_last=drop_last
     )
-
+    # 打印模型总参数量和可训练参数量，替换backbone时可快速验证模型大小变化是否合理
     if accelerator.is_main_process:
         logger.info(f"Total number of parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
         logger.info(f"Number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.2f}M")
-   
+    # 优化器选择
     if cfg.TRAINING.OPTIMIZER == "adam":
         optimizer = optim.Adam(model.parameters(), lr=cfg.TRAINING.LR)
     elif cfg.TRAINING.OPTIMIZER == "adamw":
@@ -126,11 +126,11 @@ def train_runner(cfg: DictConfig):
     else:
         raise ValueError(f"Invalid optimizer: {cfg.TRAINING.OPTIMIZER}")
 
-    # Create learning rate scheduler
+    # Create learning rate scheduler 学习率调度器
     scheduler = None
     scheduler_type = "none"
     if cfg.TRAINING.get("LR_SCHEDULER", {}).get("TYPE", "none").lower() != "none":
-        scheduler_type = cfg.TRAINING.LR_SCHEDULER.TYPE.lower()
+        scheduler_type = cfg.TRAINING.LR_SCHEDULER.TYPE.lower() # 统一转成小写
         num_epochs = cfg.TRAINING.EPOCHS
         steps_per_epoch = len(train_dataloader)
         total_steps = num_epochs * steps_per_epoch
@@ -140,7 +140,7 @@ def train_runner(cfg: DictConfig):
                 logger.info(f"Using OneCycleLR scheduler with max_lr={cfg.TRAINING.LR_SCHEDULER.MAX_LR}")
             # OneCycleLR parameters - only cycle momentum if using SGD
             cycle_momentum = cfg.TRAINING.LR_SCHEDULER.get("CYCLE_MOMENTUM", True) and isinstance(optimizer, optim.SGD)
-            scheduler = OneCycleLR(
+            scheduler = OneCycleLR( # 学习率先升后降
                 optimizer,
                 max_lr=cfg.TRAINING.LR_SCHEDULER.get("MAX_LR", 0.001),
                 total_steps=total_steps,
@@ -156,7 +156,7 @@ def train_runner(cfg: DictConfig):
         else:
             if accelerator.is_main_process:
                 logger.warning(f"Unknown scheduler type: {scheduler_type}. No scheduler will be used.")
-
+    # accelerator封装
     model, optimizer, train_dataloader, val_dataloader = accelerator.prepare(
         model,
         optimizer,
@@ -170,7 +170,7 @@ def train_runner(cfg: DictConfig):
 
     num_epochs = cfg.TRAINING.EPOCHS
     model = model.to(accelerator.device)
-
+    # checkpoint恢复
     if cfg.TRAINING.CHECKPOINT.RESUME_PATH:
         # Load only the model weights, not the optimizer state
         checkpoint_path = Path(cfg.TRAINING.CHECKPOINT.RESUME_PATH)
@@ -342,14 +342,23 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
         else:
             gt_flow_B2HW = torch.zeros(B, 2, h, w)
             gt_depth_BHW = torch.zeros(B, h, w)
+            
+        # === 新增: 读取 IMU 角速度 ===
+        if "imu_gyro" in data:
+            imu_gyro_B3 = data["imu_gyro"].to(accelerator.device)
+        else:
+            imu_gyro_B3 = None
 
         # Forward pass
         data = {
             "image": blurred_img_BCHW,
             "fl": gt_fl_B
         }
+        # 如果存在 imu_gyro，则一并传入
+        if imu_gyro_B3 is not None:
+            data["imu_gyro"] = imu_gyro_B3
         output = model(data)
-        pred_pose_B6 = output["pose"]
+        pred_pose_B3 = output["pose"]
         pred_residual_B6 = output["residual"]
         pred_flow_B2HW = output["flow_field"]
         pred_depth_BHW = output["depth"].squeeze()
@@ -358,39 +367,52 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
 
         # Compute pose loss
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            pred_aRb_B33 = roma.euler_to_rotmat('XYZ', pred_pose_B6[:, :3].squeeze())
-            pred_atb_B3 = pred_pose_B6[:, 3:].squeeze()
-            pred_aRb_B33_inv = pred_aRb_B33.transpose(1, 2)
-            pred_atb_B3_inv = (-pred_aRb_B33_inv @ pred_atb_B3.unsqueeze(-1)).squeeze()
+            # pred_aRb_B33 = roma.euler_to_rotmat('XYZ', pred_pose_B6[:, :3].squeeze())
+            pred_atb_B3 = pred_pose_B3.view(B, 3)
+            # pred_aRb_B33_inv = pred_aRb_B33.transpose(1, 2)
+            # pred_atb_B3_inv = (-pred_aRb_B33_inv @ pred_atb_B3.unsqueeze(-1)).squeeze()
             gt_aRb_B33 = gt_bRa_B33.transpose(1, 2)
-            gt_atb_B3 = -(gt_aRb_B33 @ gt_bta_B3.unsqueeze(-1)).squeeze()
-
+            gt_atb_B3 = (-(gt_aRb_B33 @ gt_bta_B3.unsqueeze(-1)).squeeze(-1)).view(B, 3)  # a->b
+            gt_bta_B3 = gt_bta_B3.view(B, 3)
+            
             # Compute if pred is closer to gt_aTb vs gt_bTa
-            pred_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(pred_aRb_B33[None]).squeeze(), pred_atb_B3], dim=1)
-            gt_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_aRb_B33[None]).squeeze(), gt_atb_B3], dim=1)
-            gt_bTa_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_bRa_B33[None]).squeeze(), gt_bta_B3], dim=1)
-            dot_prod_aTb_B1 = torch.sum(pred_aTb_vec_B6 * gt_aTb_vec_B6, dim=1)
-            dot_prod_bTa_B1 = torch.sum(pred_aTb_vec_B6 * gt_bTa_vec_B6, dim=1)
+            # pred_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(pred_aRb_B33[None]).squeeze(), pred_atb_B3], dim=1)
+            # gt_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_aRb_B33[None]).squeeze(), gt_atb_B3], dim=1)
+            # gt_bTa_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_bRa_B33[None]).squeeze(), gt_bta_B3], dim=1)
+            # dot_prod_aTb_B1 = torch.sum(pred_aTb_vec_B6 * gt_aTb_vec_B6, dim=1)
+            # dot_prod_bTa_B1 = torch.sum(pred_aTb_vec_B6 * gt_bTa_vec_B6, dim=1)
+            # reorient_mask_B = (dot_prod_aTb_B1 > dot_prod_bTa_B1).bool()
+            # gt_reorient_rots = torch.where(reorient_mask_B[:,None,None].expand(-1, 3, 3), gt_aRb_B33, gt_bRa_B33)
+            # gt_reorient_trans = torch.where(reorient_mask_B[:,None].expand(-1, 3), gt_atb_B3, gt_bta_B3)
+            # pose_loss = cfg.TRAINING.ROT_LOSS_WEIGHT * F.mse_loss(pred_aRb_B33, gt_reorient_rots) + cfg.TRAINING.TRANS_LOSS_WEIGHT * F.mse_loss(pred_atb_B3, gt_reorient_trans)
+            dot_prod_aTb_B1 = torch.sum(pred_atb_B3 * gt_atb_B3, dim=1)
+            dot_prod_bTa_B1 = torch.sum(pred_atb_B3 * gt_bta_B3, dim=1)
             reorient_mask_B = (dot_prod_aTb_B1 > dot_prod_bTa_B1).bool()
-            gt_reorient_rots = torch.where(reorient_mask_B[:,None,None].expand(-1, 3, 3), gt_aRb_B33, gt_bRa_B33)
-            gt_reorient_trans = torch.where(reorient_mask_B[:,None].expand(-1, 3), gt_atb_B3, gt_bta_B3)
-            pose_loss = cfg.TRAINING.ROT_LOSS_WEIGHT * F.mse_loss(pred_aRb_B33, gt_reorient_rots) + cfg.TRAINING.TRANS_LOSS_WEIGHT * F.mse_loss(pred_atb_B3, gt_reorient_trans)
+            gt_reorient_trans = torch.where(
+                reorient_mask_B[:, None].expand(-1, 3),
+                gt_atb_B3,
+                gt_bta_B3
+            )
+            pose_loss = (
+                cfg.TRAINING.TRANS_LOSS_WEIGHT *
+                F.mse_loss(pred_atb_B3, gt_reorient_trans)
+            )
         else:
             pose_loss = torch.tensor(0.0).to(accelerator.device)
 
         if not cfg.TRAINING.POSE_ONLY:
             # Compute flow loss
-            # Determine which gt flow direction has smallest dot product with pred flow
+            # Determine which gt flow direction has smallest dot product with pred flow；预测值与光流真值作比较
             gt_flow_fw_B2HW = gt_flow_B2HW.clone()
             gt_flow_bw_B2HW = -gt_flow_B2HW 
-            dot_prod_fw_B1HW = torch.sum(pred_flow_B2HW * gt_flow_fw_B2HW, dim=1, keepdim=True)
+            dot_prod_fw_B1HW = torch.sum(pred_flow_B2HW * gt_flow_fw_B2HW, dim=1, keepdim=True) # 计算预测光流与真正光流点积，在dim=1维度上求和，并保留求和后的dim
             dot_prod_bw_B1HW = torch.sum(pred_flow_B2HW * gt_flow_bw_B2HW, dim=1, keepdim=True)
-            reorient_mask = (dot_prod_fw_B1HW.sum(dim=(2,3)) > dot_prod_bw_B1HW.sum(dim=(2,3))).bool()
-            gt_flow_reoriented_B2HW = torch.where(reorient_mask[...,None,None].expand(-1, 2, h, w),
+            reorient_mask = (dot_prod_fw_B1HW.sum(dim=(2,3)) > dot_prod_bw_B1HW.sum(dim=(2,3))).bool() # 对H，W两个维度求和，得到整体方向相似度；True用正向真值，False用反向真值
+            gt_flow_reoriented_B2HW = torch.where(reorient_mask[...,None,None].expand(-1, 2, h, w), # 增加新维度，广播扩展到目标形状
                                                     gt_flow_fw_B2HW,
-                                                    gt_flow_bw_B2HW)
+                                                    gt_flow_bw_B2HW) # where为pytorch的条件选择函数，若第一项为true则取第二项，false取第三项
             flow_loss_BHW = torch.sum(torch.abs(pred_flow_B2HW - gt_flow_reoriented_B2HW), dim=1)
-            weighted_flow_loss = flow_loss_BHW.mean()
+            weighted_flow_loss = flow_loss_BHW.mean() # 在整个batch中对所有样本B、所有像素HxW取均值
 
             # Compute depth loss
             depth_loss_BHW = torch.abs(pred_depth_BHW - gt_depth_BHW)
@@ -416,57 +438,80 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
         ######################## METRICS ########################
 
         if not cfg.TRAINING.POSE_ONLY:
-            epe = torch.norm(pred_flow_B2HW - gt_flow_reoriented_B2HW, dim=1).mean().item()
+            epe = torch.norm(pred_flow_B2HW - gt_flow_reoriented_B2HW, dim=1).mean().item() # dim=1上取norm欧氏范数，对所有像素平均，item将只含单个数值的张量转为python标量float便于后续打印输出
 
-            x = torch.arange(w, device=accelerator.device).float()
+            x = torch.arange(w, device=accelerator.device).float() # 生成像素坐标索引向量
             y = torch.arange(h, device=accelerator.device).float()
-            y_grid, x_grid = torch.meshgrid(y, x, indexing='xy')
-            meshgrid_BN2 = torch.stack([y_grid.flatten(), x_grid.flatten()], dim=-1).unsqueeze(0).repeat(B, 1, 1)
-            pred_flow_BN2 = pred_flow_B2HW.permute(0, 2, 3, 1).view(B, -1, 2)
-            pred_matches_BN4 = torch.cat([meshgrid_BN2, meshgrid_BN2 + pred_flow_BN2], dim=2)
-            pred_flipped_BN4 = torch.cat([meshgrid_BN2 + pred_flow_BN2, meshgrid_BN2], dim=2)
+            y_grid, x_grid = torch.meshgrid(y, x, indexing='xy') # 生成网格坐标平面
+            meshgrid_BN2 = torch.stack([y_grid.flatten(), x_grid.flatten()], dim=-1).unsqueeze(0).repeat(B, 1, 1) # 将网格坐标平面变成批量化的像素坐标列表
+            pred_flow_BN2 = pred_flow_B2HW.permute(0, 2, 3, 1).view(B, -1, 2) # 将每个像素的光流变成一个二维向量，方便与坐标网格匹配
+            pred_matches_BN4 = torch.cat([meshgrid_BN2, meshgrid_BN2 + pred_flow_BN2], dim=2) # 构造正向匹配
+            pred_flipped_BN4 = torch.cat([meshgrid_BN2 + pred_flow_BN2, meshgrid_BN2], dim=2) # 构造反向匹配
 
             # Compute AbsRel depth error
-            absrel_depth = torch.abs(pred_depth_BHW - gt_depth_BHW) / gt_depth_BHW
+            absrel_depth = torch.abs(pred_depth_BHW - gt_depth_BHW) / gt_depth_BHW.abs().clamp_min(1e-6)
             absrel_depth = absrel_depth.mean()
         else:
             epe = 0.0
             absrel_depth = torch.tensor(0.0)
 
         # Compute the rotational and translational error with both prediction directions
+        # if cfg.MODEL.POSE_HEAD.SUPERVISE:
+        #     # rangle1_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33).mean().item() * 180.0 / np.pi
+        #     # rangle2_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33_inv).mean().item() * 180.0 / np.pi
+        #     tangle1_deg = translation_angle(gt_atb_B3, pred_atb_B3, batch_size=B).mean().item()
+        #     tangle2_deg = translation_angle(gt_atb_B3, pred_atb_B3_inv, batch_size=B).mean().item()
+        #     terror1_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
+        #     terror2_m = torch.norm(gt_atb_B3 - pred_atb_B3_inv, dim=1).mean().item()
+        #     # if tangle2_deg**2 + rangle2_deg**2 < tangle1_deg**2 + rangle1_deg**2:
+        #     if tangle2_deg**2 < tangle1_deg**2:
+        #         # rangle_deg = rangle2_deg
+        #         tangle_deg = tangle2_deg
+        #         # pred_aRb_B33 = pred_aRb_B33_inv
+        #         pred_atb_B3 = pred_atb_B3_inv
+        #         terror_m = terror2_m
+        #     else:
+        #         # rangle_deg = rangle1_deg
+        #         tangle_deg = tangle1_deg
+        #         terror_m = terror1_m
+        # else:
+        #     # rangle_deg = 0.0
+        #     tangle_deg = 0.0
+        #     terror_m = 0.0
+        
+        # 平移角度/距离指标（取与预测更接近的真值方向）
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            rangle1_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33).mean().item() * 180.0 / np.pi
-            rangle2_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33_inv).mean().item() * 180.0 / np.pi
-            tangle1_deg = translation_angle(gt_atb_B3, pred_atb_B3, batch_size=B).mean().item()
-            tangle2_deg = translation_angle(gt_atb_B3, pred_atb_B3_inv, batch_size=B).mean().item()
-            terror1_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
-            terror2_m = torch.norm(gt_atb_B3 - pred_atb_B3_inv, dim=1).mean().item()
-            if tangle2_deg**2 + rangle2_deg**2 < tangle1_deg**2 + rangle1_deg**2:
-                rangle_deg = rangle2_deg
-                tangle_deg = tangle2_deg
-                pred_aRb_B33 = pred_aRb_B33_inv
-                pred_atb_B3 = pred_atb_B3_inv
-                terror_m = terror2_m
+            def _angle_deg(u, v):
+                u_n = F.normalize(u, dim=1)
+                v_n = F.normalize(v, dim=1)
+                cos = (u_n * v_n).sum(dim=1).clamp(-1 + 1e-6, 1 - 1e-6)
+                return torch.acos(cos) * (180.0 / np.pi)
+
+            ang_to_atb = _angle_deg(gt_atb_B3, pred_atb_B3).mean().item()
+            ang_to_bta = _angle_deg(gt_bta_B3, pred_atb_B3).mean().item()
+            if ang_to_bta < ang_to_atb:
+                tangle_deg = ang_to_bta
+                terror_m = torch.norm(gt_bta_B3 - pred_atb_B3, dim=1).mean().item()
             else:
-                rangle_deg = rangle1_deg
-                tangle_deg = tangle1_deg
-                terror_m = terror1_m
+                tangle_deg = ang_to_atb
+                terror_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
+            rangle_deg = 0.0  # 不再评估旋转
         else:
             rangle_deg = 0.0
             tangle_deg = 0.0
             terror_m = 0.0
-
+            
         if train:
-            accelerator.backward(total_loss)
+            accelerator.backward(total_loss) # 反向传播
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            optimizer.zero_grad()
+                accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0) # 裁剪梯度，防止爆炸
+            optimizer.step() # 用梯度更新模型参数
+            optimizer.zero_grad() # 清除旧梯度，防止累积
             
             # Step OneCycleLR scheduler after each batch
             if scheduler is not None and cfg.TRAINING.LR_SCHEDULER.TYPE == "onecycle":
-                scheduler.step()
-
+                scheduler.step() # 更新学习率
+        # 逐步更新各个指标的平均值
         running_loss = (running_loss*i + total_loss.item()) / (i + 1)
         running_pose_loss = (running_pose_loss*i + pose_loss.item()) / (i + 1)
         running_flow_loss = (running_flow_loss*i + weighted_flow_loss.item()) / (i + 1)
@@ -511,15 +556,23 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
                     "train/depth_maps": [wandb_depth_maps],
                     "train/quivers": [wandb_quivers]
                 })
-                del hsv, depth_maps, quivers
+                del hsv, depth_maps, quivers # del删除变量的引用，及时删除中间变量防止内存爆满
                 del wandb_hsv, wandb_depth_maps, wandb_quivers
 
+        # del gt_K_B33 # 循环训练释放显存
+        # if not cfg.TRAINING.POSE_ONLY:
+        #     del h, w, x, y, x_grid, y_grid, meshgrid_BN2, pred_flow_BN2, pred_matches_BN4, pred_flipped_BN4, gt_bRa_B33, gt_bta_B3
+        # if cfg.MODEL.POSE_HEAD.SUPERVISE:
+        #     del gt_aRb_B33, pred_aRb_B33, pred_aRb_B33_inv, pred_atb_B3, pred_atb_B3_inv, gt_atb_B3
+        #     del rangle_deg, tangle_deg, terror_m, rangle1_deg, rangle2_deg, tangle1_deg, tangle2_deg, terror1_m, terror2_m
+        # if i < len(dataloader) - 1:
+        #     del blurred_img_BCHW, gt_flow_B2HW, pred_flow_B2HW, gt_depth_BHW, pred_depth_BHW
+            
         del gt_K_B33
         if not cfg.TRAINING.POSE_ONLY:
             del h, w, x, y, x_grid, y_grid, meshgrid_BN2, pred_flow_BN2, pred_matches_BN4, pred_flipped_BN4, gt_bRa_B33, gt_bta_B3
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            del gt_aRb_B33, pred_aRb_B33, pred_aRb_B33_inv, pred_atb_B3, pred_atb_B3_inv, gt_atb_B3
-            del rangle_deg, tangle_deg, terror_m, rangle1_deg, rangle2_deg, tangle1_deg, tangle2_deg, terror1_m, terror2_m
+            del pred_atb_B3, gt_atb_B3, tangle_deg, terror_m, ang_to_atb, ang_to_bta
         if i < len(dataloader) - 1:
             del blurred_img_BCHW, gt_flow_B2HW, pred_flow_B2HW, gt_depth_BHW, pred_depth_BHW
 

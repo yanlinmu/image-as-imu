@@ -127,6 +127,14 @@ class MotionBlurredDataset(Dataset):
             [0, fy_px, cy_px],
             [0, 0, 1]
         ])
+        
+        #--------- 新增 IMU 角速度字段 ---------
+        imu_gyro = torch.tensor([
+            self.data["imu_gyro_x"].iloc[idx],
+            self.data["imu_gyro_y"].iloc[idx],
+            self.data["imu_gyro_z"].iloc[idx]
+        ], dtype=torch.float32)
+        # -----------------------------------
 
         data = {
             'blurred': blurred_image,
@@ -134,6 +142,7 @@ class MotionBlurredDataset(Dataset):
             "bRa": bRa_33.float(),
             "bta": bta_3.float(),
             "K": K_33.float(),
+            "imu_gyro": imu_gyro,
         }
 
         if not self.pose_only or self.use_pseudo_gt:

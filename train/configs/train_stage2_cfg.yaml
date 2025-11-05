@@ -1,13 +1,13 @@
 # Basic settings
 SEED: 0
 RUN_NAME:
-DEBUG: false
+DEBUG: true
 
 # Model configuration
 MODEL:
   TYPE: mscan
   ENCODER:
-    WEIGHTS:
+    WEIGHTS: /home/myl/image-as-an-imu/checkpoints/mscan_t.pth
   POSE_HEAD:
     SUPERVISE: true # We use pose supervision in stage 2
     USE_PINV: false
@@ -33,7 +33,7 @@ TRAINING:
     THREE_PHASE: false
 
   MIXED_PRECISION: bf16
-  ROT_LOSS_WEIGHT: 1.0
+  ROT_LOSS_WEIGHT: 0
   TRANS_LOSS_WEIGHT: 10.0
   POSE_LOSS_WEIGHT: 1000.0
   FLOW_LOSS_WEIGHT: 1e-4
@@ -46,15 +46,15 @@ TRAINING:
 
   CHECKPOINT:
     SAVE: true
-    RESUME_PATH: # In stage 2 we resume from the last checkpoint of stage 1
-    DIR: # Path to the directory to save checkpoints
+    RESUME_PATH: /home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage1/ckpt_000019 # In stage 2 we resume from the last checkpoint of stage 1
+    DIR: /home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage2_imu # Path to the directory to save checkpoints
     INTERVAL: 5
     OVERWRITE: false
 
 # Dataset configuration
 DATASET:
-  TRAIN_DATA: # Path to the training data csv file (same as stage 1)
-  VAL_DATA: # Path to the validation data csv file (same as stage 1)
+  TRAIN_DATA: /home/myl/image-as-an-imu/synth_data_gen/synth_data_train-skip_10_with_imu_rad_per_frame.csv # Path to the training data csv file (same as stage 1)
+  VAL_DATA: /home/myl/image-as-an-imu/synth_data_gen/synth_data_val-skip_10_with_imu_rad_per_frame.csv # Path to the validation data csv file (same as stage 1)
   HEIGHT: 252
   WIDTH: 336
   CENTERCROP_DIMS: [224, 320]

@@ -1,7 +1,7 @@
 data_path: /home/myl/strayscanner_data # Required path to sequence directory
 precomputed_vels_path: null
-save_suffix: fps1
+save_suffix: fps3
 save_vels: True
 viz_metrics: True
 
-ckpt_path: /home/myl/image-as-an-imu/checkpoints/segnext_iaai.pth
+ckpt_path: /home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage2/1018_135236/ckpt_000019/model.safetensors

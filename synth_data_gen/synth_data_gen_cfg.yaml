@@ -1,7 +1,7 @@
 SYNTH_DATA_PATH: /home/myl/synthetic_data # Path to where the synthetic data will be saved
-SCANNETPP_DATA_PATH: /home/myl/scannet++dataset/data # Path to the ScanNet++ data/ directory
+SCANNETPP_DATA_PATH: /home/myl/scannet++dataset_iphone/data # Path to the ScanNet++ data/ directory
 RIFE_MODEL_PATH: /home/myl/ECCV2022-RIFE/train_log # Path to directory where RIFE checkpoint is saved (likely train_log/)
-SPLITS: [train, val]
+SPLITS: [val]
 DATA:
   HEIGHT: 252
   WIDTH: 336

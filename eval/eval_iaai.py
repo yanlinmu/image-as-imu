@@ -124,10 +124,14 @@ def main(cfg: DictConfig):
         rot_title = title_prefix + " - Angular Vels vs Gyroscope"
         trans_title = title_prefix + " - Translational Vels vs ARKit"
         
+        save_path = precomputed_vels_dir / f"plots" / "rot_vels.pdf"
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         viz_time_series(pred_rot_vels, imu_gyro_N3, frame_ts, imu_ts, 
-                       rot_or_trans="rot", title=rot_title)
+                       rot_or_trans="rot", title=rot_title, save_path=precomputed_vels_dir / f"plots" / "rot_vels.pdf")
+        save_path = precomputed_vels_dir / f"plots" / "trans_vels.pdf"
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         viz_time_series(pred_trans_vels, arkit_tvel_N3, frame_ts, arkit_ts, 
-                       rot_or_trans="trans", title=trans_title)
+                       rot_or_trans="trans", title=trans_title, save_path=precomputed_vels_dir / f"plots" / "trans_vels.pdf")
 
 if __name__ == "__main__":
     main() 

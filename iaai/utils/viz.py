@@ -188,7 +188,7 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
     closest_gt_ts = gt_ts[closest_indices]
     abs_error = np.abs(pred_vels_N3 - gt_vels_N3[closest_indices])
 
-    fig = sp.make_subplots(rows=3, cols=2)
+    fig = sp.make_subplots(rows=3, cols=2, shared_yaxes=True)
     if rot_or_trans == "rot":
         dim_names = [r'$\omega_x \text{ (s}^{-1}\text{)}$', r'$\omega_y \text{ (s}^{-1}\text{)}$', r'$\omega_z \text{ (s}^{-1}\text{)}$']
     elif rot_or_trans == "trans":
@@ -202,8 +202,9 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
                 x=gt_ts - min(pred_ts[0], gt_ts[0]),
                 y=gt_vels_N3[:, i], 
                 name="Ground Truth",
+                opacity=0.8,  # 半透明
                 fill=None, 
-                line=dict(color="blue"),
+                line=dict(color="blue", width=0.5),
                 showlegend=(i == 0)
             ),
             row=i+1, col=1
@@ -213,8 +214,9 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
                 x=pred_ts - min(pred_ts[0], gt_ts[0]), 
                 y=pred_vels_N3[:, i], 
                 name="Predicted",
+                line=dict(color="red", width=0.5),
+                opacity=0.8,
                 fill='tonexty', 
-                marker=dict(color="red"),
                 showlegend=(i == 0)
             ),
             row=i+1, col=1
@@ -225,7 +227,7 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
                 y=abs_error[:, i], 
                 name="Abs Error", 
                 mode="markers",
-                marker=dict(color="red"),
+                marker=dict(color="red", size=3, opacity=0.7),
                 showlegend=(i == 0)
             ),
             row=i+1, col=2
@@ -234,6 +236,7 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
         fig.update_yaxes(title_text=dim_name, row=i+1, col=1)
         fig.update_xaxes(title_text="Time (s)", row=i+1, col=2)
         fig.update_yaxes(title_text=f"Abs Error", row=i+1, col=2)
+        fig.update_yaxes(showticklabels=True, row=i+1, col=2)
 
     fig.update_layout(
         title=title,
@@ -246,5 +249,5 @@ def viz_time_series(pred_vels_N3, gt_vels_N3, pred_ts, gt_ts, rot_or_trans="rot"
         )
     )
     if save_path is not None:
-        fig.write_image(save_path)
+        fig.write_image(save_path, width=2400, height=1600, scale=3)
     # fig.show()

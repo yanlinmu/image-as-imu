@@ -1,0 +1,70 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug image-as-imu train.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/myl/image-as-an-imu/train/train.py",
+            "console": "integratedTerminal",
+            "cwd": "/home/myl/image-as-an-imu",
+            "justMyCode": true,
+            "python": "/home/myl/anaconda3/envs/image-as-imu/bin/python",
+            "env": {
+                "HYDRA_FULL_ERROR": "1",
+                "WANDB_MODE": "disabled"
+            },
+            "args": [
+                "--config-path=./configs",
+                "--config-name=train_stage1_cfg",
+                "MODEL.TYPE=mscan",
+                "MODEL.ENCODER.WEIGHTS=checkpoints/mscan_t.pth",
+                "MODEL.POSE_HEAD.SUPERVISE=True",
+                "TRAINING.BATCH_SIZE=2",
+                "TRAINING.EPOCHS=1",
+                "TRAINING.NUM_WORKERS=0",
+                "DEBUG=False",
+                "TRAINING.CHECKPOINT.SAVE=False",
+                "LOGGING.PLATFORM=null",
+                "TRAINING.ROT_LOSS_WEIGHT=0.0",
+            ]
+        },
+        {
+            "name": "Debug image-as-imu eval_iaai.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/myl/image-as-an-imu/eval/eval_iaai.py",
+            "console": "integratedTerminal",
+            "cwd": "/home/myl/image-as-an-imu/eval",
+            "justMyCode": false,
+            "python": "/home/myl/anaconda3/envs/image-as-imu/bin/python",
+            "env": {
+                "HYDRA_FULL_ERROR": "1"
+            },
+            "args": [
+                "--config-path=./configs",
+                "--config-name=iaai_cfg",
+                "data_path=/home/myl/image-as-an-imu/iaai_test-sequence/test-billiards",
+                "precomputed_vels_path=null",
+                "save_suffix=tiny-billiards",
+                "save_vels=false",
+                "viz_time_series=false",
+                "ckpt_path=/home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage2/1018_135236/ckpt_000019/model.safetensors",
+                "oracle_direction=true"
+            ]
+        },
+        {
+            "name": "Debug run.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/myl/image-as-an-imu/run.py",
+            "console": "integratedTerminal",
+            "cwd": "/home/myl/image-as-an-imu",
+            "justMyCode": true,
+            "env": {
+                "HYDRA_FULL_ERROR": "1",
+                "CUDA_VISIBLE_DEVICES": "1"
+            }
+        }
+    ]
+}

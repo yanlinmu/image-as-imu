@@ -7,7 +7,7 @@ DEBUG: false
 MODEL:
   TYPE: mscan # Only supports mscan for now
   ENCODER:
-    WEIGHTS: # Path to the pretrained mscan_b.pth weights
+    WEIGHTS: /home/myl/image-as-an-imu/checkpoints/mscan_t.pth # Path to the pretrained mscan_x.pth weights
   POSE_HEAD:
     SUPERVISE: false
     USE_PINV: false
@@ -15,11 +15,11 @@ MODEL:
 
 # Training configuration
 TRAINING:
-  BATCH_SIZE: 32
+  BATCH_SIZE: 16
   NUM_WORKERS: 4
-  EPOCHS: 20
-  OPTIMIZER: adamw # Options: adam, adamw
-  LR: 1e-5
+  EPOCHS: 25
+  OPTIMIZER: adam # Options: adam, adamw
+  LR: 5e-6
   LR_SCHEDULER:
     TYPE: none  # Options: "onecycle", "none"
     # OneCycleLR specific parameters
@@ -33,7 +33,7 @@ TRAINING:
     FINAL_DIV_FACTOR: 10000.0  # Final LR = INITIAL_LR / FINAL_DIV_FACTOR
     THREE_PHASE: false  # If True, use three phase schedule
 
-  MIXED_PRECISION: bf16
+  MIXED_PRECISION: "fp16"
   ROT_LOSS_WEIGHT: 1.0
   TRANS_LOSS_WEIGHT: 10.0
   POSE_LOSS_WEIGHT: 1000.0
@@ -48,14 +48,14 @@ TRAINING:
   CHECKPOINT:
     SAVE: true
     RESUME_PATH:
-    DIR: # Path to the directory to save checkpoints
+    DIR: /home/myl/image-as-an-imu/checkpoints/mscan_tiny/stage1 # Path to the directory to save checkpoints
     INTERVAL: 5  # How often to save checkpoints (in epochs)
     OVERWRITE: false  # Whether to overwrite existing checkpoints
 
 # Dataset configuration
 DATASET:
-  TRAIN_DATA: # Path to the training data csv file
-  VAL_DATA: # Path to the validation data csv file
+  TRAIN_DATA: /home/myl/image-as-an-imu/synth_data_gen/synth_data_train-skip_10.csv # Path to the training data csv file
+  VAL_DATA: /home/myl/image-as-an-imu/synth_data_gen/synth_data_val-skip_10.csv # Path to the validation data csv file
   HEIGHT: 252
   WIDTH: 336
   CENTERCROP_DIMS: [224, 320]

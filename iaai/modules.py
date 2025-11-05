@@ -223,7 +223,7 @@ class Hamburger(nn.Module):
         ham = F.relu(x + enjoy, inplace=False)
         return ham
 
-
+# 特征融合模块，连接backbone和具体预测任务（flow/depth）的桥梁
 class LightHamHead(nn.Module):
     """Is Attention Better Than Matrix Decomposition?
 
@@ -234,9 +234,11 @@ class LightHamHead(nn.Module):
         """Light hamburger decoder head."""
         super().__init__()
         self.in_index = [0, 1, 2, 3]
-        self.in_channels = [64, 128, 320, 512]
+        # self.in_channels = [64, 128, 320, 512] # base
+        self.in_channels = [32, 64, 160, 256] # tiny
         self.out_channels = 64
-        self.ham_channels = 512
+        # self.ham_channels = 512 # base，建议跟最后一层对齐
+        self.ham_channels = 256    # tiny，建议跟最后一层对齐
         self.align_corners = False
 
         self.squeeze = ConvModule(sum(self.in_channels), self.ham_channels, 1)
@@ -250,8 +252,8 @@ class LightHamHead(nn.Module):
 
     def forward(self, features: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass."""
-        inputs = [features["hl"][i] for i in self.in_index]
-
+        inputs = [features["hl"][i] for i in self.in_index] # features["hl"]是backbone输出的四个尺度特征
+        # 四层特征插值到同一分辨率
         inputs = [
             F.interpolate(
                 level, size=inputs[0].shape[2:], mode="bilinear", align_corners=self.align_corners
@@ -259,11 +261,11 @@ class LightHamHead(nn.Module):
             for level in inputs
         ]
 
-        inputs = torch.cat(inputs, dim=1)
-        x = self.squeeze(inputs)
+        inputs = torch.cat(inputs, dim=1) # 通道拼接
+        x = self.squeeze(inputs) # squeeze：用1x1卷积统一通道维度
 
-        x = self.hamburger(x)
-
+        x = self.hamburger(x) # hamburger模块非负矩阵分解
+        # 最后卷积几层，融合低层特征
         feats = self.align(x)
 
         assert "ll" in features, "Low-level features are required for this model"
@@ -503,16 +505,20 @@ class OverlapPatchEmbed(nn.Module):
 class MSCAN(nn.Module):
     """Multi-scale convolutional attention network."""
 
-    def __init__(self):
+    def __init__(self, variant="tiny"):
         """Multi-scale convolutional attention network."""
         super().__init__()
         self.in_channels = 3
-        self.embed_dims = [64, 128, 320, 512]
+        if variant == "tiny":
+            self.embed_dims = [32, 64, 160, 256] # 每个stage输出的通道数
+            self.depths = [3, 3, 5, 2] # 每个stage包含的block模块数量
+        elif variant == "base":
+            self.embed_dims = [64, 128, 320, 512]
+            self.depths = [3, 3, 12, 3]
         self.mlp_ratios = [8, 8, 4, 4]
         self.drop_rate = 0.0
-        self.drop_path_rate = 0.1
-        self.depths = [3, 3, 12, 3]
-        self.num_stages = 4
+        self.drop_path_rate = 0.1        
+        self.num_stages = 4 # 整个网络的stage数量，每个stage都会让特征图的分辨率变小、通道数变大
 
         for i in range(self.num_stages):
             if i == 0:

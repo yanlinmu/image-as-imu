@@ -1,3 +1,5 @@
+# 此脚本使用的是源代码中的28M backbone进行推理，并且对输出可视化图像的形状格式进行了优化；增加了fps测试代码
+
 import torch
 import roma
 import hydra
@@ -149,9 +151,9 @@ def main(cfg: DictConfig):
         # viz_time_series(pred_trans_vels, arkit_tvel_N3, frame_ts, arkit_ts, 
         #                rot_or_trans="trans", title=trans_title)
         viz_time_series(pred_rot_vels, imu_gyro_N3, frame_ts, imu_ts,
-                     rot_or_trans="rot", title=rot_title, save_path="/home/myl/strayscanner_data/precomputed_vels_iaai_fps1/plots/rot_vels.png")
+                     rot_or_trans="rot", title=rot_title, save_path="/home/myl/strayscanner_data/precomputed_vels_iaai_fps1/plots/rot_vels.pdf")
         viz_time_series(pred_trans_vels, arkit_tvel_N3, frame_ts, arkit_ts,
-                     rot_or_trans="trans", title=trans_title, save_path="/home/myl/strayscanner_data/precomputed_vels_iaai_fps1/plots/trans_vels.png")
+                     rot_or_trans="trans", title=trans_title, save_path="/home/myl/strayscanner_data/precomputed_vels_iaai_fps1/plots/trans_vels.pdf")
 
 
 if __name__ == "__main__":
