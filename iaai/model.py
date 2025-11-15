@@ -119,49 +119,36 @@ class PoseHead(nn.Module):
 
         A = A_weighted.float().cuda() # 前面已经把A整理成[B, 2N', 6]的形状
         b = b_weighted.float().cuda() # 前面已经把b整理成[B, 2N', 1]的形状
-        
-        # ------------------增加IMU角速度------------------
-        # 分离旋转与平移
-        A_rot = A[:, :, :3]  # omega_x, omega_y, omega_z 部分
-        A_trans = A[:, :, 3:]  # tx, ty, tz 部分
-        # 获取IMU角速度
-        omega_imu = imu_gyro.to(A.device).to(A.dtype).detach()  # shape: [B, 3]；detach保证IMU不反传梯度
-        # omega_imu_scaled = omega_imu * 0.1667 # 此处的0.01为曝光时间，LLS按照每帧来进行计算，而原始IMU数据为rad/s；w_per_frame = w_rad/s * exposure_time
-        # 修正右侧观测项
-        b_corrected = b - (A_rot @ omega_imu.unsqueeze(-1))
-        # ------------------------------------------------
-        # print("||b|| =", torch.norm(b))
-        # print("||A_rot @ omega_imu|| =", torch.norm(A_rot @ omega_imu.unsqueeze(-1)))
-        # print("||b - A_rot @ omega_imu|| =", torch.norm(b_corrected))
 
-        # # Solve with LLS
-        # if self.use_pinv:
-        #     with torch.autocast(device_type='cuda', dtype=torch.float32):
-        #         x_B6 = torch.linalg.pinv(A) @ b
-        #         # Compute residual
-        #         res = torch.norm(A @ x_B6 - b, dim=1).squeeze()
-        # else:
-        #     x_B6, res, rank, S = torch.linalg.lstsq(A, b, driver='gels')
+        # Expand A and b with IMU gyro constraints
+        # Add three more rows to A: [focal_length 0 0 0 0 0], [0 focal_length 0 0 0 0], [0 0 focal_length 0 0 0]
+        fl_B_expanded = fl_B.float().cuda()  # [B]
+        A_imu_rows = torch.stack([
+            torch.stack([fl_B_expanded, torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded),
+                        torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded)], dim=1),
+            torch.stack([torch.zeros_like(fl_B_expanded), fl_B_expanded, torch.zeros_like(fl_B_expanded),
+                        torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded)], dim=1),
+            torch.stack([torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded), fl_B_expanded,
+                        torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded), torch.zeros_like(fl_B_expanded)], dim=1)
+        ], dim=1)  # [B, 3, 6]
 
-        # return x_B6.to(flow_BN2.dtype), res.to(flow_BN2.dtype)
+        # Add three more elements to b from imu_gyro [B, 3]
+        b_imu = imu_gyro.float().cuda().unsqueeze(-1)  # [B, 3, 1]
 
-        # ------------------增加IMU角速度------------------    
-        # 只对平移部分解最小二乘
+        # Concatenate to expand A and b
+        A = torch.cat([A, A_imu_rows], dim=1)  # [B, 2N'+3, 6]
+        b = torch.cat([b, b_imu], dim=1)  # [B, 2N'+3, 1]
+
+        # Solve with LLS using expanded A and b
         if self.use_pinv:
             with torch.autocast(device_type='cuda', dtype=torch.float32):
-                t_B3 = torch.linalg.pinv(A_trans) @ b_corrected  # [B, 3, 1]
-                res = torch.norm(A_trans @ t_B3 - b_corrected, dim=1).squeeze()
+                x_B6 = torch.linalg.pinv(A) @ b
+                # Compute residual
+                res = torch.norm(A @ x_B6 - b, dim=1).squeeze()
         else:
-            lstsq_result = torch.linalg.lstsq(A_trans, b_corrected, driver='gels')
-            t_B3 = lstsq_result.solution                         # [B, 3, 1]
-            res = lstsq_result.residuals.squeeze() if lstsq_result.residuals is not None else torch.norm(A_trans @ t_B3 - b_corrected, dim=1).squeeze()
+            x_B6, res, rank, S = torch.linalg.lstsq(A, b, driver='gels')
 
-        # # 拼接成完整六维结果 [ωx, ωy, ωz, Tx, Ty, Tz]
-        # x_B6 = torch.cat([omega_imu, t_B3.squeeze(-1)], dim=-1)
-        x_B3 = t_B3.squeeze(-1)
-
-        return x_B3.to(flow_BN2.dtype), res.to(flow_BN2.dtype)
-        # ------------------------------------------------
+        return x_B6.to(flow_BN2.dtype), res.to(flow_BN2.dtype)
 
     def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         flow_B2HW = data["flow_field"]
@@ -169,9 +156,9 @@ class PoseHead(nn.Module):
         fl_B = data["fl"]
         imu_gyro = data["imu_gyro"]
 
-        x_B3, res = self.compute_camera_motion(flow_B2HW, depth_BHW, fl_B, imu_gyro)
+        x_B6, res = self.compute_camera_motion(flow_B2HW, depth_BHW, fl_B, imu_gyro)
 
-        return {"pose": x_B3, "residual": res}
+        return {"pose": x_B6, "residual": res}
 
 class Blur2PoseSegNeXtBackbone(nn.Module):
     def __init__(

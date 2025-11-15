@@ -358,7 +358,7 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
         if imu_gyro_B3 is not None:
             data["imu_gyro"] = imu_gyro_B3
         output = model(data)
-        pred_pose_B3 = output["pose"]
+        pred_pose_B6 = output["pose"]
         pred_residual_B6 = output["residual"]
         pred_flow_B2HW = output["flow_field"]
         pred_depth_BHW = output["depth"].squeeze()
@@ -367,36 +367,23 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
 
         # Compute pose loss
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            # pred_aRb_B33 = roma.euler_to_rotmat('XYZ', pred_pose_B6[:, :3].squeeze())
-            pred_atb_B3 = pred_pose_B3.view(B, 3)
-            # pred_aRb_B33_inv = pred_aRb_B33.transpose(1, 2)
-            # pred_atb_B3_inv = (-pred_aRb_B33_inv @ pred_atb_B3.unsqueeze(-1)).squeeze()
+            pred_aRb_B33 = roma.euler_to_rotmat('XYZ', pred_pose_B6[:, :3].squeeze())
+            pred_atb_B3 = pred_pose_B6[:, 3:].squeeze()
+            pred_aRb_B33_inv = pred_aRb_B33.transpose(1, 2)
+            pred_atb_B3_inv = (-pred_aRb_B33_inv @ pred_atb_B3.unsqueeze(-1)).squeeze()
             gt_aRb_B33 = gt_bRa_B33.transpose(1, 2)
-            gt_atb_B3 = (-(gt_aRb_B33 @ gt_bta_B3.unsqueeze(-1)).squeeze(-1)).view(B, 3)  # a->b
-            gt_bta_B3 = gt_bta_B3.view(B, 3)
+            gt_atb_B3 = -(gt_aRb_B33 @ gt_bta_B3.unsqueeze(-1)).squeeze()
             
             # Compute if pred is closer to gt_aTb vs gt_bTa
-            # pred_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(pred_aRb_B33[None]).squeeze(), pred_atb_B3], dim=1)
-            # gt_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_aRb_B33[None]).squeeze(), gt_atb_B3], dim=1)
-            # gt_bTa_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_bRa_B33[None]).squeeze(), gt_bta_B3], dim=1)
-            # dot_prod_aTb_B1 = torch.sum(pred_aTb_vec_B6 * gt_aTb_vec_B6, dim=1)
-            # dot_prod_bTa_B1 = torch.sum(pred_aTb_vec_B6 * gt_bTa_vec_B6, dim=1)
-            # reorient_mask_B = (dot_prod_aTb_B1 > dot_prod_bTa_B1).bool()
-            # gt_reorient_rots = torch.where(reorient_mask_B[:,None,None].expand(-1, 3, 3), gt_aRb_B33, gt_bRa_B33)
-            # gt_reorient_trans = torch.where(reorient_mask_B[:,None].expand(-1, 3), gt_atb_B3, gt_bta_B3)
-            # pose_loss = cfg.TRAINING.ROT_LOSS_WEIGHT * F.mse_loss(pred_aRb_B33, gt_reorient_rots) + cfg.TRAINING.TRANS_LOSS_WEIGHT * F.mse_loss(pred_atb_B3, gt_reorient_trans)
-            dot_prod_aTb_B1 = torch.sum(pred_atb_B3 * gt_atb_B3, dim=1)
-            dot_prod_bTa_B1 = torch.sum(pred_atb_B3 * gt_bta_B3, dim=1)
+            pred_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(pred_aRb_B33[None]).squeeze(), pred_atb_B3], dim=1)
+            gt_aTb_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_aRb_B33[None]).squeeze(), gt_atb_B3], dim=1)
+            gt_bTa_vec_B6 = torch.cat([roma.rotmat_to_rotvec(gt_bRa_B33[None]).squeeze(), gt_bta_B3], dim=1)
+            dot_prod_aTb_B1 = torch.sum(pred_aTb_vec_B6 * gt_aTb_vec_B6, dim=1)
+            dot_prod_bTa_B1 = torch.sum(pred_aTb_vec_B6 * gt_bTa_vec_B6, dim=1)
             reorient_mask_B = (dot_prod_aTb_B1 > dot_prod_bTa_B1).bool()
-            gt_reorient_trans = torch.where(
-                reorient_mask_B[:, None].expand(-1, 3),
-                gt_atb_B3,
-                gt_bta_B3
-            )
-            pose_loss = (
-                cfg.TRAINING.TRANS_LOSS_WEIGHT *
-                F.mse_loss(pred_atb_B3, gt_reorient_trans)
-            )
+            gt_reorient_rots = torch.where(reorient_mask_B[:,None,None].expand(-1, 3, 3), gt_aRb_B33, gt_bRa_B33)
+            gt_reorient_trans = torch.where(reorient_mask_B[:,None].expand(-1, 3), gt_atb_B3, gt_bta_B3)
+            pose_loss = cfg.TRAINING.ROT_LOSS_WEIGHT * F.mse_loss(pred_aRb_B33, gt_reorient_rots) + cfg.TRAINING.TRANS_LOSS_WEIGHT * F.mse_loss(pred_atb_B3, gt_reorient_trans)
         else:
             pose_loss = torch.tensor(0.0).to(accelerator.device)
 
@@ -456,51 +443,28 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
             absrel_depth = torch.tensor(0.0)
 
         # Compute the rotational and translational error with both prediction directions
-        # if cfg.MODEL.POSE_HEAD.SUPERVISE:
-        #     # rangle1_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33).mean().item() * 180.0 / np.pi
-        #     # rangle2_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33_inv).mean().item() * 180.0 / np.pi
-        #     tangle1_deg = translation_angle(gt_atb_B3, pred_atb_B3, batch_size=B).mean().item()
-        #     tangle2_deg = translation_angle(gt_atb_B3, pred_atb_B3_inv, batch_size=B).mean().item()
-        #     terror1_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
-        #     terror2_m = torch.norm(gt_atb_B3 - pred_atb_B3_inv, dim=1).mean().item()
-        #     # if tangle2_deg**2 + rangle2_deg**2 < tangle1_deg**2 + rangle1_deg**2:
-        #     if tangle2_deg**2 < tangle1_deg**2:
-        #         # rangle_deg = rangle2_deg
-        #         tangle_deg = tangle2_deg
-        #         # pred_aRb_B33 = pred_aRb_B33_inv
-        #         pred_atb_B3 = pred_atb_B3_inv
-        #         terror_m = terror2_m
-        #     else:
-        #         # rangle_deg = rangle1_deg
-        #         tangle_deg = tangle1_deg
-        #         terror_m = terror1_m
-        # else:
-        #     # rangle_deg = 0.0
-        #     tangle_deg = 0.0
-        #     terror_m = 0.0
-        
-        # 平移角度/距离指标（取与预测更接近的真值方向）
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            def _angle_deg(u, v):
-                u_n = F.normalize(u, dim=1)
-                v_n = F.normalize(v, dim=1)
-                cos = (u_n * v_n).sum(dim=1).clamp(-1 + 1e-6, 1 - 1e-6)
-                return torch.acos(cos) * (180.0 / np.pi)
-
-            ang_to_atb = _angle_deg(gt_atb_B3, pred_atb_B3).mean().item()
-            ang_to_bta = _angle_deg(gt_bta_B3, pred_atb_B3).mean().item()
-            if ang_to_bta < ang_to_atb:
-                tangle_deg = ang_to_bta
-                terror_m = torch.norm(gt_bta_B3 - pred_atb_B3, dim=1).mean().item()
+            rangle1_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33).mean().item() * 180.0 / np.pi
+            rangle2_deg = roma.rotmat_geodesic_distance(gt_aRb_B33, pred_aRb_B33_inv).mean().item() * 180.0 / np.pi
+            tangle1_deg = translation_angle(gt_atb_B3, pred_atb_B3, batch_size=B).mean().item()
+            tangle2_deg = translation_angle(gt_atb_B3, pred_atb_B3_inv, batch_size=B).mean().item()
+            terror1_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
+            terror2_m = torch.norm(gt_atb_B3 - pred_atb_B3_inv, dim=1).mean().item()
+            if tangle2_deg**2 + rangle2_deg**2 < tangle1_deg**2 + rangle1_deg**2:
+                rangle_deg = rangle2_deg
+                tangle_deg = tangle2_deg
+                pred_aRb_B33 = pred_aRb_B33_inv
+                pred_atb_B3 = pred_atb_B3_inv
+                terror_m = terror2_m
             else:
-                tangle_deg = ang_to_atb
-                terror_m = torch.norm(gt_atb_B3 - pred_atb_B3, dim=1).mean().item()
-            rangle_deg = 0.0  # 不再评估旋转
+                rangle_deg = rangle1_deg
+                tangle_deg = tangle1_deg
+                terror_m = terror1_m
         else:
             rangle_deg = 0.0
             tangle_deg = 0.0
             terror_m = 0.0
-            
+                          
         if train:
             accelerator.backward(total_loss) # 反向传播
             if accelerator.sync_gradients:
@@ -559,23 +523,15 @@ def run(dataloader, model, optimizer, accelerator, cfg, train=True, scheduler=No
                 del hsv, depth_maps, quivers # del删除变量的引用，及时删除中间变量防止内存爆满
                 del wandb_hsv, wandb_depth_maps, wandb_quivers
 
-        # del gt_K_B33 # 循环训练释放显存
-        # if not cfg.TRAINING.POSE_ONLY:
-        #     del h, w, x, y, x_grid, y_grid, meshgrid_BN2, pred_flow_BN2, pred_matches_BN4, pred_flipped_BN4, gt_bRa_B33, gt_bta_B3
-        # if cfg.MODEL.POSE_HEAD.SUPERVISE:
-        #     del gt_aRb_B33, pred_aRb_B33, pred_aRb_B33_inv, pred_atb_B3, pred_atb_B3_inv, gt_atb_B3
-        #     del rangle_deg, tangle_deg, terror_m, rangle1_deg, rangle2_deg, tangle1_deg, tangle2_deg, terror1_m, terror2_m
-        # if i < len(dataloader) - 1:
-        #     del blurred_img_BCHW, gt_flow_B2HW, pred_flow_B2HW, gt_depth_BHW, pred_depth_BHW
-            
-        del gt_K_B33
+        del gt_K_B33 # 循环训练释放显存
         if not cfg.TRAINING.POSE_ONLY:
             del h, w, x, y, x_grid, y_grid, meshgrid_BN2, pred_flow_BN2, pred_matches_BN4, pred_flipped_BN4, gt_bRa_B33, gt_bta_B3
         if cfg.MODEL.POSE_HEAD.SUPERVISE:
-            del pred_atb_B3, gt_atb_B3, tangle_deg, terror_m, ang_to_atb, ang_to_bta
+            del gt_aRb_B33, pred_aRb_B33, pred_aRb_B33_inv, pred_atb_B3, pred_atb_B3_inv, gt_atb_B3
+            del rangle_deg, tangle_deg, terror_m, rangle1_deg, rangle2_deg, tangle1_deg, tangle2_deg, terror1_m, terror2_m
         if i < len(dataloader) - 1:
             del blurred_img_BCHW, gt_flow_B2HW, pred_flow_B2HW, gt_depth_BHW, pred_depth_BHW
-
+                
     quivers = None
     hsv = None
     depth_maps = None

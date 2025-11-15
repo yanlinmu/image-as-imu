@@ -17,12 +17,11 @@ opencv2gyro_tf = torch.tensor([[ 0, -1,  0],
                                [ 0,  0, -1]]).float()
 # gyro坐标系角速度
 omega_gyro = torch.tensor([[6.73, -4.47, 3.07]], dtype=torch.float32)
-# omega_gyro = torch.tensor([[0, 0, 0]], dtype=torch.float32)
 # 转换到相机坐标系
 omega_cam = omega_gyro @ opencv2gyro_tf.T
 
 demo_img = Image.open("./assets/demo.jpg")
-data = {"image": demo_img, "fx": 251.3630, "fy": 251.7480, "imu_gyro": omega_cam} # fx, fy相机内参中的焦距
+data = {"image": demo_img, "fx": 1433.1024, "fy": 1433.1024, "imu_gyro": omega_cam} # fx, fy相机内参中的焦距
 # 单张图片推理计时
 torch.cuda.synchronize()
 t0 = time.time()
@@ -37,17 +36,12 @@ print(f"Inference time: {t1 - t0:.4f} s, FPS: {fps:.2f}")  # 单帧耗时
 # opencv2gyro_tf = torch.tensor([[ 0, -1,  0],
 #                                [-1,  0,  0],
 #                                [ 0,  0, -1]]).float()
-# rot_vel, trans_vel = compute_single_image_velocity(
-#     out["pose"].squeeze(),
-#     exposure_time_s=0.01,
-#     M=opencv2gyro_tf,
-#     device="cuda")
-trans_vel = compute_single_image_velocity(
+rot_vel, trans_vel = compute_single_image_velocity(
     out["pose"].squeeze(),
     exposure_time_s=0.01,
     M=opencv2gyro_tf,
     device="cuda")
 
 # Note that the velocity has sign ambiguity if there is only one image
-# print(f"Rotational velocity: {rot_vel.cpu().numpy()}")
+print(f"Rotational velocity: {rot_vel.cpu().numpy()}")
 print(f"Translational velocity: {trans_vel.cpu().numpy()}")

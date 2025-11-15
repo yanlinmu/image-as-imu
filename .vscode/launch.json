@@ -16,7 +16,7 @@
             },
             "args": [
                 "--config-path=./configs",
-                "--config-name=train_stage1_cfg",
+                "--config-name=train_stage2_cfg",
                 "MODEL.TYPE=mscan",
                 "MODEL.ENCODER.WEIGHTS=checkpoints/mscan_t.pth",
                 "MODEL.POSE_HEAD.SUPERVISE=True",

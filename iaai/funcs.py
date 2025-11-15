@@ -136,16 +136,15 @@ def compute_single_image_velocity(pose_6D, exposure_time_s, M=None, device="cpu"
     Returns:
         vel_B3: (B,3) tensor of velocity
     """
-    # aRb = roma.euler_to_rotmat('XYZ', pose_6D[:3]).squeeze().to(device)
+    aRb = roma.euler_to_rotmat('XYZ', pose_6D[:3]).squeeze().to(device)
     atb = pose_6D[3:].squeeze().to(device)
 
-    # if M is None:
-    #     M = torch.eye(3)
-    # M = M.float().to(device)
-    # aRb = M @ aRb @ M.T
+    if M is None:
+        M = torch.eye(3)
+    M = M.float().to(device)
+    aRb = M @ aRb @ M.T
 
-    # rot_vel = roma.rotmat_to_euler('XYZ', aRb) / exposure_time_s
+    rot_vel = roma.rotmat_to_euler('XYZ', aRb) / exposure_time_s
     trans_vel = atb.squeeze() / exposure_time_s
 
-    # return rot_vel, trans_vel
-    return trans_vel
+    return rot_vel, trans_vel
